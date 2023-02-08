@@ -1,0 +1,10 @@
+gym==0.21.0
+imageio==2.19.3
+numpy==1.23.1
+optuna==3.0.4
+torch==1.12.0
+pillow==9.2.0
+setuptools==61.2.0
+pandas==1.4.3
+plotly==5.10.0
+matplotlib==3.5.1
