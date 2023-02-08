@@ -49,9 +49,9 @@ hyper_parameters = {  # don't change any parameters for initial step
 config = {
     'roll out': 2000,  # for ta01 use 2000 and for ft 06 use 110
     'instance id': "ta01",  # use ta01 or ft06
-    'model file': r"models1\ta01_def_param_6M_512steps.zip",  # final model file ta01_makespan_1355 or ft06_makespan
+    'model file': r"models1\ta01_def_param_6M_448steps.zip",  # final model file ta01_makespan_1355 or ft06_makespan
     'train timestep': 6_000_000,  # training time step
-    'n_steps': 512,  # change based on ur training performance, was 448 for ta01
+    'n_steps': 448,  # change based on ur training performance, was 448 for ta01
     'hyper parameters': hyper_parameters,  # don't change this for now
     'visu': False,  # don't use it while training
     'verbose': False,
@@ -81,17 +81,18 @@ def _linear_schedule(initial_value: float, final_value: float) -> Callable[[floa
         :param progress_remaining:
         :return: current learning rate
         """
-        print(progress_remaining)
+        #print(initial_value)
+        #print(final_value)
+        #print(progress_remaining)
         progress = 1 - progress_remaining
-        print(progress)
+        #print(progress)
         p_1 = progress_remaining * initial_value
-        print(initial_value)
-        print(p_1)
-        p_2 = final_value
+        #print(p_1)
+        p_2 = progress * final_value
         #print(final_value)
         #print(p_2)
         rate = p_1 + p_2
-        print(rate)
+        #print(rate)
         return rate
     return func
 
@@ -207,10 +208,10 @@ def sample_ppo_params(trail: optuna.Trial) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    train = True
+    train = False
     evaluate = False
     validation_process = False
-    hyperparam_opt = False
+    hyperparam_opt = True
 
 
     if validation_process:
