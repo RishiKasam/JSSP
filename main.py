@@ -49,9 +49,9 @@ hyper_parameters = {  # don't change any parameters for initial step
 config = {
     'roll out': 2000,  # for ta01 use 2000 and for ft 06 use 110
     'instance id': "ta01",  # use ta01 or ft06
-    'model file': r"models1\ta01_def_param_6M_448steps.zip",  # final model file ta01_makespan_1355 or ft06_makespan
+    'model file': r"models1\ta01_def_params6M.zip",  # final model file ta01_makespan_1355 or ft06_makespan
     'train timestep': 6_000_000,  # training time step
-    'n_steps': 448,  # change based on ur training performance, was 448 for ta01
+    'n_steps': 512,  # change based on ur training performance, was 448 for ta01
     'hyper parameters': hyper_parameters,  # don't change this for now
     'visu': False,  # don't use it while training
     'verbose': False,
@@ -232,7 +232,7 @@ if __name__ == "__main__":
                     learning_rate=_linear_schedule(initial_value=1e-3, final_value=1e-10)
                     ,batch_size=128,gamma=0.99)'''
 
-        model = PPO("MultiInputPolicy", env, verbose=0, tensorboard_log='./Logs1/', n_steps=config['n_steps'])
+        model = PPO("MultiInputPolicy", env, verbose=0, tensorboard_log='./Logs1/')  #, n_steps=config['n_steps'])
         #model = A2C("MultiInputPolicy", env, verbose=0, learning_rate=1e-4, tensorboard_log='./Logs/', rms_prop_eps=1e-7, use_rms_prop=False)
                     #,gae_lambda=0.9, ent_coef=0.001, vf_coef=0.5, max_grad_norm=0.5, rms_prop_eps=1e-05, use_rms_prop=True)
 
@@ -274,124 +274,69 @@ if __name__ == "__main__":
         env.close()
 
     if hyperparam_opt:
-        '''env = SubprocVecEnv(
-            [lambda: _make_env(config['instance id'], config['hyper parameters'], i) for i in range(config['n_cpu'])])
-        env = VecMonitor(env)'''
 
-        env = gym.make('Jssp-v0', instance_id=config['instance id'], hyper_parameters=config['hyper parameters'],
+        def objective(trail):
+            # set hyper-parameters to tune
+
+            learning_rate = trail.suggest_float("learning_rate", 1e-15, 1) # suggest_loguniform
+            lr_schedule = trail.suggest_categorical('lr_schedule', ['linear', 'constant'])
+            n_steps = trail.suggest_categorical("n_steps", [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096])
+            batch_size = trail.suggest_categorical("batch_size", [8, 16, 32, 64, 128, 256, 512])
+            gamma = trail.suggest_categorical("gamma", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999, 0.9995])
+            gae_lambda = trail.suggest_categorical("gae_lambda", [0.8, 0.9, 0.92, 0.95, 0.98, 0.99, 1.0])
+            clip_range = trail.suggest_categorical("clip_range", [0.1, 0.2, 0.3, 0.4])
+            ent_coef = trail.suggest_float("ent_coef", low=1e-8, high=0.1) # suggest_loguniform
+            vf_coef = trail.suggest_float("vf_coef", low=0, high=1) # suggest_uniform
+            max_grad_norm = trail.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5])
+            n_epochs = trail.suggest_categorical("n_epochs", [1, 5, 10, 20])
+
+            return {
+                "n_steps": n_steps,
+                "batch_size": batch_size,
+                "gamma": gamma,
+                "learning_rate": learning_rate,
+                "ent_coef": ent_coef,
+                "clip_range": clip_range,
+                "n_epochs": n_epochs,
+                "gae_lambda": gae_lambda,
+                "max_grad_norm": max_grad_norm,
+                "vf_coef": vf_coef,
+
+
+            }
+
+            # create environment
+
+            '''env = SubprocVecEnv(
+                [lambda: _make_env(config['instance id'], config['hyper parameters'], i) for i in range(config['n_cpu'])])
+            env = VecMonitor(env)'''
+
+            env = gym.make('Jssp-v0', instance_id=config['instance id'], hyper_parameters=config['hyper parameters'],
                        roll_out_timestep=config['roll out'])
 
-        N_TRIALS = 10 #100
-        N_STARTUP_TRAILS = 2 #5
-        N_EVALUATIONS = 10000 #2
-        N_TIMESTEPS = int(1e6)
-        EVAL_FREQ = int(N_TIMESTEPS / N_EVALUATIONS)
-        N_EVAL_EPISODES = 0 #3
+            # create PPO model with tuned hyper parameters
 
-        ENV_ID = "Jssp-v0"
+            model = PPO("MultiInputPolicy", env, learning_rate=learning_rate, n_steps=n_steps, batch_size=batch_size,
+                        gamma=gamma, gae_lambda=gae_lambda, clip_range=clip_range, ent_coef=ent_coef, vf_coef=vf_coef,
+                        max_grad_norm=max_grad_norm, n_epochs=n_epochs)
 
-        DEFAULT_HYPERPARAMS = {
-            "policy": "MultiInputPolicy",
-            "env": env,
-        }
+            # train the model
 
+            model.learn(total_timesteps=100000)
 
-        class TrialEvalCallback(EvalCallback):
-            """Callback used for evaluating and reporting a trial."""
+            # evaluation of model
 
-            def __init__(
-                    self,
-                    eval_env: gym.Env,
-                    trial: optuna.Trial,
-                    n_eval_episodes: int = 5,
-                    eval_freq: int = 10000,
-                    log_path: Optional[str] = None,
-                    best_model_save_path: Optional[str] = None,
-                    deterministic: bool = True,
-                    verbose: int = 0,
-            ):
+            state = env.reset()
+            done = False
+            while not done:
+                actions, _ = model.predict(state, deterministic=True)
+                # actions = env.action_space.sample()
+                state, reward, done, _ = env.step(actions)
 
-                super().__init__(
-                    eval_env=eval_env,
-                    n_eval_episodes=n_eval_episodes,
-                    eval_freq=eval_freq,
-                    deterministic=deterministic,
-                    verbose=verbose,
+        # run Optuna to find the best parameters
 
-                )
-                self.trial = trial
-                self.eval_idx = 0
-                self.is_pruned = False
+        study = optuna.create_study(direction= 'maximize')
+        study.optimize(objective, n_trials=2)
 
-            def _on_step(self) -> bool:
-                if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
-                    super()._on_step()
-                    self.eval_idx += 1
-                    self.trial.report(self.last_mean_reward, self.eval_idx)
-                    # Prune trial if need
-                    if self.trial.should_prune():
-                        self.is_pruned = True
-                        return False
-                return True
-
-        def objective(trail: optuna.Trial) -> float:
-            kwargs = DEFAULT_HYPERPARAMS.copy()
-            kwargs.update(sample_ppo_params(trail))
-            model = PPO(**kwargs)
-            # Create env used for evaluation
-            #eval_env = gym.make(ENV_ID)
-            eval_env = env
-
-            eval_callback = TrialEvalCallback(
-                eval_env, trail, n_eval_episodes=N_EVAL_EPISODES,
-                 eval_freq=EVAL_FREQ, deterministic=True, best_model_save_path="./best_model_logs/"
-            )
-
-            nan_encountered = False
-            try:
-                model.learn(N_TIMESTEPS, callback=eval_callback)
-            except AssertionError as e:
-                # sometimes random hyperparams can generate NaN
-                print(e)
-                nan_encountered = True
-            finally:
-                # Free memory
-                model.env.close()
-                eval_env.close()
-
-            # Tell optimizer that the trail failed
-            if nan_encountered:
-                return float("nan")
-            if eval_callback.is_pruned:
-                raise optuna.exceptions.TrialPruned()
-
-            return eval_callback.last_mean_reward
-
-         # Set pytorch num threads to 1 for faster training
-        torch.set_num_threads(1)
-
-        sampler = TPESampler(n_startup_trials=N_STARTUP_TRAILS)
-        # Do not prune before 1/3 of the max budget is used
-        pruner = MedianPruner(n_startup_trials=N_STARTUP_TRAILS, n_warmup_steps=N_EVALUATIONS // 3)
-
-        study = optuna.create_study(sampler=sampler, pruner=pruner, direction="maximize")
-        try:
-            study.optimize(objective, n_trials=N_TRIALS, timeout=5500)
-        except KeyboardInterrupt:
-            pass
-
-        '''study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler())
-        study.optimize(objective, n_trials=100)'''
-
-        #study.best_params
-
-        print("Number of finished trials: {}".format(len(study.trials)))
-
-        print("Best trial:")
-        trial = study.best_trial
-
-        print("  Value: {}".format(trial.value))
-
-        print("  Params: ")
-        for key, value in trial.params.items():
-            print("    {}: {}".format(key, value))
+        # print the best hyper-parameters
+        print(study.best_trial.params)
