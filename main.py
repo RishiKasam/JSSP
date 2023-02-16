@@ -137,12 +137,77 @@ def _make_env(instance_id, parameters, rank, seed=0):
     return _init()
 
 
+def sample_ppo_params(trail):
+    # set hyper-parameters to tune
+
+    learning_rate = trail.suggest_float("learning_rate", 1e-15, 1e-3)  # suggest_loguniform
+    # lr_schedule = trail.suggest_categorical('lr_schedule', ['linear', 'constant'])
+    n_steps = trail.suggest_categorical("n_steps", [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096])
+    batch_size = trail.suggest_categorical("batch_size", [8, 16, 32, 64, 128, 256, 512, 1024])
+    gamma = trail.suggest_categorical("gamma", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999, 0.9995])
+    gae_lambda = trail.suggest_categorical("gae_lambda", [0.8, 0.9, 0.92, 0.95, 0.98, 0.99, 1.0])
+    clip_range = trail.suggest_categorical("clip_range", [0.1, 0.2, 0.3, 0.4])
+    ent_coef = trail.suggest_float("ent_coef", low=1e-8, high=0.1)  # suggest_loguniform
+    vf_coef = trail.suggest_float("vf_coef", low=0, high=1)  # suggest_uniform
+    max_grad_norm = trail.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5])
+    #n_epochs = trail.suggest_categorical("n_epochs", [1, 5, 10, 20])
+
+    return {
+        "n_steps": n_steps,
+        "batch_size": batch_size,
+        "gamma": gamma,
+        "learning_rate": learning_rate,
+        "ent_coef": ent_coef,
+        "clip_range": clip_range,
+        #"n_epochs": n_epochs,
+        "gae_lambda": gae_lambda,
+        "max_grad_norm": max_grad_norm,
+        "vf_coef": vf_coef,
+
+    }
+
+
+class TrialEvalCallback(EvalCallback):
+    """Callback used for evaluating and reporting a trial."""
+
+    def __init__(
+        self,
+        eval_env: gym.Env,
+        trial: optuna.Trial,
+        n_eval_episodes: int = 5,
+        eval_freq: int = 10000,
+        deterministic: bool = True,
+        verbose: int = 0,
+    ):
+
+        super(TrialEvalCallback, self).__init__(
+            eval_env=eval_env,
+            n_eval_episodes=n_eval_episodes,
+            eval_freq=eval_freq,
+            deterministic=deterministic,
+            verbose=verbose,
+        )
+        self.trial = trial
+        self.eval_idx = 0
+        self.is_pruned = False
+
+    def _on_step(self) -> bool:
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            super(TrialEvalCallback, self)._on_step()
+            self.eval_idx += 1
+            self.trial.report(self.last_mean_reward, self.eval_idx)
+            # Prune trial if need
+            if self.trial.should_prune():
+                self.is_pruned = True
+                return False
+        return True
+
+
 if __name__ == "__main__":
     train = False
     evaluate = False
     validation_process = False
     hyperparam_opt = True
-
 
     if validation_process:
         validator = valid.Validate()
@@ -206,34 +271,8 @@ if __name__ == "__main__":
     if hyperparam_opt:
 
         def objective(trail):
-            # set hyper-parameters to tune
 
-            learning_rate = trail.suggest_float("learning_rate", 1e-15, 1) # suggest_loguniform
-            lr_schedule = trail.suggest_categorical('lr_schedule', ['linear', 'constant'])
-            n_steps = trail.suggest_categorical("n_steps", [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096])
-            batch_size = trail.suggest_categorical("batch_size", [8, 16, 32, 64, 128, 256, 512])
-            gamma = trail.suggest_categorical("gamma", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999, 0.9995])
-            gae_lambda = trail.suggest_categorical("gae_lambda", [0.8, 0.9, 0.92, 0.95, 0.98, 0.99, 1.0])
-            clip_range = trail.suggest_categorical("clip_range", [0.1, 0.2, 0.3, 0.4])
-            ent_coef = trail.suggest_float("ent_coef", low=1e-8, high=0.1) # suggest_loguniform
-            vf_coef = trail.suggest_float("vf_coef", low=0, high=1) # suggest_uniform
-            max_grad_norm = trail.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5])
-            n_epochs = trail.suggest_categorical("n_epochs", [1, 5, 10, 20])
-
-            return {
-                "n_steps": n_steps,
-                "batch_size": batch_size,
-                "gamma": gamma,
-                "learning_rate": learning_rate,
-                "ent_coef": ent_coef,
-                "clip_range": clip_range,
-                "n_epochs": n_epochs,
-                "gae_lambda": gae_lambda,
-                "max_grad_norm": max_grad_norm,
-                "vf_coef": vf_coef,
-
-
-            }
+            kwargs = sample_ppo_params(trail)
 
             # create environment
 
@@ -246,13 +285,14 @@ if __name__ == "__main__":
 
             # create PPO model with tuned hyper parameters
 
-            model = PPO("MultiInputPolicy", env, learning_rate=learning_rate, n_steps=n_steps, batch_size=batch_size,
-                        gamma=gamma, gae_lambda=gae_lambda, clip_range=clip_range, ent_coef=ent_coef, vf_coef=vf_coef,
-                        max_grad_norm=max_grad_norm, n_epochs=n_epochs)
+            model = PPO("MultiInputPolicy", env, **kwargs)
 
+            eval_callback = TrialEvalCallback(env, trail, n_eval_episodes=3,
+                                              eval_freq=100000,
+                                              deterministic=True)
             # train the model
 
-            model.learn(total_timesteps=100000)
+            model.learn(total_timesteps=300000, callback=eval_callback)
 
             # evaluation of model
 
@@ -263,10 +303,12 @@ if __name__ == "__main__":
                 # actions = env.action_space.sample()
                 state, reward, done, _ = env.step(actions)
 
+                return reward
+
         # run Optuna to find the best parameters
 
         study = optuna.create_study(direction= 'maximize')
-        study.optimize(objective, n_trials=2)
+        study.optimize(objective, n_trials=10)
 
         # print the best hyper-parameters
         print(study.best_trial.params)
