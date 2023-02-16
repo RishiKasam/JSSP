@@ -141,7 +141,7 @@ def sample_ppo_params(trail):
     # set hyper-parameters to tune
 
     learning_rate = trail.suggest_float("learning_rate", 1e-15, 1e-3)  # suggest_loguniform
-    # lr_schedule = trail.suggest_categorical('lr_schedule', ['linear', 'constant'])
+    lr_schedule = trail.suggest_categorical('lr_schedule', ['linear', 'constant'])
     n_steps = trail.suggest_categorical("n_steps", [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096])
     batch_size = trail.suggest_categorical("batch_size", [8, 16, 32, 64, 128, 256, 512, 1024])
     gamma = trail.suggest_categorical("gamma", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999, 0.9995])
@@ -152,11 +152,19 @@ def sample_ppo_params(trail):
     max_grad_norm = trail.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5])
     #n_epochs = trail.suggest_categorical("n_epochs", [1, 5, 10, 20])
 
+    if batch_size > n_steps:
+        batch_size = n_steps
+
+    if lr_schedule == "linear":
+
+        learning_rate = linear_schedule(initial_value=learning_rate)
+
     return {
         "n_steps": n_steps,
         "batch_size": batch_size,
         "gamma": gamma,
         "learning_rate": learning_rate,
+        "lr_schedule": lr_schedule,
         "ent_coef": ent_coef,
         "clip_range": clip_range,
         #"n_epochs": n_epochs,
